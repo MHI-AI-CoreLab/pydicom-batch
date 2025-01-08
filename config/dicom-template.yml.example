@@ -1,0 +1,62 @@
+common:
+  pacs:
+    hostname: <PACS_HOST>  # PACS server hostname or IP address
+    port: <PACS_PORT>      # PACS server port (typically 104 or 11112)
+    aet: <PACS_AET>        # PACS Application Entity Title
+  local:
+    port: <LOCAL_PORT>     # Local port for DICOM services (e.g., 4000)
+    aet: <LOCAL_AET>       # Local Application Entity Title
+  schedule:
+    enabled: false         # Enable/disable scheduled operations
+    start_time: '18:30'    # Schedule start time in 24h format
+    end_time: '06:45'      # Schedule end time in 24h format
+    timezone: America/New_York  # Timezone for scheduled operations
+
+c-find:
+  threads: 8              # Number of concurrent C-FIND threads
+  throttle_time: 0        # Delay between requests in seconds (0 for no delay)
+  model: study            # Query model: 'study' or 'series'
+  elements_batch_file: /path/to/batch/file.csv  # Optional: CSV file with additional query filters. The column names must match the elements below.
+  elements:
+    - PatientID=*
+    - StudyDate=YYYYMMDD-YYYYMMDD  # Format: YYYYMMDD-YYYYMMDD (e.g., 20240101-20240831)
+    - PatientName=*
+    - AccessionNumber=*
+    - StudyInstanceUID=*
+    - StudyDescription=*
+    - ModalitiesInStudy=XA         # Modality to search for (XA, MR, CT, etc.)
+    - QueryRetrieveLevel=STUDY     # STUDY or SERIES level
+    # Series level elements (uncomment if QueryRetrieveLevel=SERIES)
+    # - Modality=*
+    # - SeriesInstanceUID=*
+    # - SeriesDescription=*
+
+  output:
+    directory: /path/to/output/directory
+    database_file: /path/to/output/database.csv
+
+c-move:
+  threads: 8              # Number of concurrent C-MOVE threads
+  throttle_time: 0        # Delay between requests in seconds
+  model: STUDY           # Same as QueryRetrieveLevel
+  elements_batch_file: /path/to/studies/database.csv  # The column names must match the elements below.
+  elements:
+    - PatientID=*
+    - StudyInstanceUID=*
+    - QueryRetrieveLevel=STUDY
+    # Series level elements (uncomment if QueryRetrieveLevel=SERIES)
+    # - Modality=*
+    # - SeriesInstanceUID=*
+    # - SeriesDescription=*
+
+  output:
+    directory: /path/to/results
+    database_file: /path/to/results/database.csv
+    directory_structure: PatientID/StudyInstanceUID/SeriesInstanceUID  # Output directory structure
+    filename: SOPInstanceUID                                          # Filename pattern for DICOM files
+    decompress: false    # Whether to decompress DICOM files
+
+  anonymization:
+    enabled: false       # Enable/disable DICOM anonymization
+    script: /path/to/anonymization/script
+    lookup_table: /path/to/lookup/table 
