@@ -395,12 +395,12 @@ class SCU(object):
         
         if self.association.is_established:
             responses = self.association.send_c_move(identifier, self.config['local']['aet'], self.query_model)
-            print(self.config)
-            print(self.query_model)
+            # print(self.config)
+            # print(self.query_model)
             try:
                 for (status, rsp_identifier) in responses:
-                    print(status)
-                    print(rsp_identifier)
+                    # print(status)
+                    # print(rsp_identifier)
                     if status and status.Status in [0xFF00]:
                         # Status pending
                         pass
