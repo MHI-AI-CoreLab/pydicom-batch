@@ -13,6 +13,7 @@ import concurrent.futures
 import numpy as np
 import inquirer
 import ast
+import threading
 
 from pynetdicom import (
     AE, QueryRetrievePresentationContexts
@@ -237,9 +238,10 @@ def failed_requests(config):
     
     return requests
 
-def thread_scu_function(config, pbar, requests):
+def thread_scu_function(config, pbar, pbar_lock, requests):
     scu = SCU(config)
     scu.pbar = pbar
+    scu.pbar_lock = pbar_lock  # Pass the shared progress bar lock
     scu.process_requests_batch(list(requests))
     return
 
@@ -269,7 +271,8 @@ def process_request_batch(config):
         pbar = tqdm.tqdm(total=len(requests), 
             desc='Sending {} requests '.format(config['request']['type']), 
             unit='rqst')
-        fn = lambda x : thread_scu_function(config, pbar, x)
+        pbar_lock = threading.Lock()  # Create a shared lock for the progress bar
+        fn = lambda x : thread_scu_function(config, pbar, pbar_lock, x)
         if config['request']['threads'] > 1:
             with concurrent.futures.ThreadPoolExecutor(max_workers=config['request']['threads']) as executor:
                 executor.map(fn, split_requests)
@@ -305,6 +308,7 @@ class SCU(object):
         self.ae = self.create_ae()
         self.query_model = self.create_query_model()
         self.pbar = None
+        self.pbar_lock = threading.Lock()  # Add thread lock for progress bar updates
         
     def create_ae(self):
         # Create application entity
@@ -447,7 +451,8 @@ class SCU(object):
                         dataset_to_csv(rsp_identifier, path, keywords)
                 else:
                     if self.pbar:
-                        self.pbar.update(1)
+                        with self.pbar_lock:  # Use lock when updating the progress bar
+                            self.pbar.update(1)
                     # Status Success, Warning, Cancel, Failure
                     if status.Status in [0x0000]:
                         if response_count > 4500:
@@ -484,7 +489,8 @@ class SCU(object):
                     else:
                         # Status Success, Warning, Cancel, Failure
                         if self.pbar:
-                            self.pbar.update(1)
+                            with self.pbar_lock:  # Use lock when updating the progress bar
+                                self.pbar.update(1)
                         identifier.Status = hex(status.Status)
                         keywords.append('Status')
                         path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
