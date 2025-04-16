@@ -88,6 +88,31 @@ def create_dataset(request):
         raise exc
     return ds
 
+def split_date_range(date_range):
+    """Split a date range string (YYYYMMDD-YYYYMMDD) into 5-day intervals"""
+    if not date_range or '-' not in date_range:
+        return [date_range]
+        
+    start_date_str, end_date_str = date_range.split('-')
+    start_date = datetime.datetime.strptime(start_date_str, '%Y%m%d')
+    end_date = datetime.datetime.strptime(end_date_str, '%Y%m%d')
+    
+    date_ranges = []
+    current_date = start_date
+    while current_date <= end_date:
+        # Get the date 5 days from current date
+        next_period = current_date + datetime.timedelta(days=5)
+            
+        # Adjust end date to be either end of current 5-day period or final end date
+        period_end_date = min(next_period - datetime.timedelta(days=1), end_date)
+        
+        date_range_str = f"{current_date.strftime('%Y%m%d')}-{period_end_date.strftime('%Y%m%d')}"
+        date_ranges.append(date_range_str)
+        
+        current_date = next_period
+        
+    return date_ranges
+
 def create_requests(config):
     requests = []
     if 'elements_batch_file' in config['request']:
@@ -103,9 +128,31 @@ def create_requests(config):
         else:
             requests.append(config['request'])
     else:
-        requests.append(config['request'])
+        # Find StudyDate element and split into weekly intervals if present
+        study_date_element = None
+        for element in config['request']['elements']:
+            if element.startswith('StudyDate='):
+                study_date_element = element
+                break
+                
+        if study_date_element:
+            date_range = study_date_element.split('=')[1]
+            date_ranges = split_date_range(date_range)
+            
+            # Create a request for each weekly interval
+            for weekly_range in date_ranges:
+                weekly_request = config['request'].copy()
+                weekly_request['elements'] = weekly_request['elements'].copy()
+                
+                # Replace the StudyDate element with the weekly range
+                weekly_request['elements'] = [
+                    f"StudyDate={weekly_range}" if e.startswith('StudyDate=') else e 
+                    for e in weekly_request['elements']
+                ]
+                requests.append(weekly_request)
+        else:
+            requests.append(config['request'])
 
-    
     filepath_requests = os.path.join(config['output']['directory'], 'requests.whole')
     filepath_requests_completed = os.path.join(config['output']['directory'], 'requests.completed')
     filepath_requests_failed = os.path.join(config['output']['directory'], 'requests.failed')
@@ -365,17 +412,47 @@ class SCU(object):
         
         if self.association.is_established:
             responses = self.association.send_c_find(identifier, self.query_model)
+            response_count = 0
                     
             for (status, rsp_identifier) in responses:
                 if status and status.Status in [0xFF00, 0xFF01]:
                     # Status pending
-                    path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
-                    dataset_to_csv(rsp_identifier, path, keywords)
+                    response_count += 1
+                    # Apply description filters if enabled
+                    should_save = True
+                    if 'description_filter' in self.config['request'] and self.config['request']['description_filter']['enabled']:
+                        should_save = False
+                        # Check study description filter
+                        if self.config['request']['description_filter']['study_description'] and 'StudyDescription' in rsp_identifier:
+                            study_desc = str(rsp_identifier.StudyDescription).upper()
+                            for filter_str in self.config['request']['description_filter']['study_description']:
+                                if filter_str.upper() in study_desc:
+                                    should_save = True
+                                    break
+                        
+                        # Check series description filter if at SERIES level
+                        if (not should_save and 
+                            self.config['request']['description_filter']['series_description'] and 
+                            'SeriesDescription' in rsp_identifier and
+                            'QueryRetrieveLevel' in rsp_identifier and
+                            rsp_identifier.QueryRetrieveLevel == 'SERIES'):
+                            series_desc = str(rsp_identifier.SeriesDescription).upper()
+                            for filter_str in self.config['request']['description_filter']['series_description']:
+                                if filter_str.upper() in series_desc:
+                                    should_save = True
+                                    break
+                    
+                    if should_save:
+                        path = os.path.join(self.config['output']['directory'], self.config['output']['database_file'])
+                        dataset_to_csv(rsp_identifier, path, keywords)
                 else:
                     if self.pbar:
                         self.pbar.update(1)
                     # Status Success, Warning, Cancel, Failure
                     if status.Status in [0x0000]:
+                        if response_count > 4500:
+                            study_date = next((elem.split('=')[1] for elem in request['elements'] if elem.startswith('StudyDate=')), None)
+                            print(f"\nWARNING: Large response count ({response_count}) for date range {study_date}. Consider using smaller date ranges (Limit is 5000).")
                         filepath_requests_completed = os.path.join(self.config['output']['directory'], 'requests.completed')
                         dict_to_csv(request, filepath_requests_completed, request.keys())
                     else:
